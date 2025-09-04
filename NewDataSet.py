@@ -10,7 +10,8 @@ class VLSIOpenMaskDataset(Dataset):
         for file_idx, path in enumerate(self.h5_paths):
             with h5py.File(path, 'r') as hf:
                 i = 0
-                while f'img_{i}' in hf:
+                Limit = np.inf if 'rectrees' not in path else 10000
+                while f'img_{i}' in hf and i < Limit:
                     self.index_map.append((file_idx, i))
                     i += 1
 
@@ -45,8 +46,9 @@ class VLSIOpenMaskDataset(Dataset):
         hf = self._h5_handles[file_idx]
 
         img_np = hf[f'img_{inner_idx}'][:]
-        center_np = hf[f'center_{inner_idx}'][:]
-
+        try: center_np = hf[f'center_{inner_idx}'][:]
+        except: center_np = (48,0) #dummy value for circuit with no defects
+        
         img_np = img_np.astype(np.float32) / 255.0
         img_tensor = torch.from_numpy(img_np).unsqueeze(0)
 

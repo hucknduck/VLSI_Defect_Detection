@@ -32,7 +32,7 @@ class DiscreteCenterPredictorCNN(nn.Module):
         self.flattened_size = 3 * 3 * 32
 
         # Layer 6: Fully Connected layers - now with two heads
-        self.fc_shared = nn.Linear(self.flattened_size, 48*48) # Shared FC layer
+        self.fc_shared = nn.Linear(self.flattened_size, 48*48 + 1) # Shared FC layer - size is 48*48 for (x,y) coords + 1 for "no defect"
 
 
     def forward(self, x):

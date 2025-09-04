@@ -14,7 +14,7 @@ def main():
         os.path.join(DataDir, "opens2.h5"),
         os.path.join(DataDir, "opens3.h5"),
         os.path.join(DataDir, "opens4.h5"),
-        os.path.join(DataDir, "opens5.h5")
+        os.path.join(DataDir, "opens5.h5"),
     ]
 
     # count = [0 for _ in range(48*48)]

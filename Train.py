@@ -9,9 +9,10 @@ import matplotlib
 import matplotlib.pyplot as plt
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import numpy as np
 
 from NewModel import DiscreteCenterPredictorCNN
-from DataSet import VLSIOpenMaskDataset
+from NewDataSet import VLSIOpenMaskDataset
 
 matplotlib.use('Agg')
 
@@ -41,7 +42,8 @@ def Train(DataDir, OutputDir, NumEpochs, TrainTestSplit, CheckPointPath, local_r
         os.path.join(DataDir, "opens2.h5"),
         os.path.join(DataDir, "opens3.h5"),
         os.path.join(DataDir, "opens4.h5"),
-        os.path.join(DataDir, "opens5.h5")
+        os.path.join(DataDir, "opens5.h5"),
+        os.path.join(DataDir, "rectrees1.h5")
     ]
 
     full_dataset = VLSIOpenMaskDataset(h5_paths)
@@ -56,6 +58,15 @@ def Train(DataDir, OutputDir, NumEpochs, TrainTestSplit, CheckPointPath, local_r
 
     train_indices = indices[:split]
     val_indices   = indices[split:]
+
+    #Save indices for reproducibility and evaluation
+    if rank == 0:
+        if not os.path.exists(OutputDir):
+            os.makedirs(OutputDir)
+        TrainPath = os.path.join(OutputDir, "train_indices.npy")
+        ValPath   = os.path.join(OutputDir, "val_indices.npy") 
+        np.save(TrainPath, train_indices)
+        np.save(ValPath, val_indices)
 
     train_dataset = Subset(full_dataset, train_indices)
     val_dataset   = Subset(full_dataset, val_indices)

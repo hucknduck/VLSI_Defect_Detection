@@ -21,7 +21,7 @@ def setup_ddp():
 def cleanup_ddp():
     dist.destroy_process_group()
 
-def Eval(ModelPath, DataPath, local_rank):
+def Eval(ModelPath, OutputDir, DataPath, local_rank):
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     device = torch.device("cuda", local_rank)
@@ -40,16 +40,25 @@ def Eval(ModelPath, DataPath, local_rank):
         os.path.join(DataPath, "opens2.h5"),
         os.path.join(DataPath, "opens3.h5"),
         os.path.join(DataPath, "opens4.h5"),
-        os.path.join(DataPath, "opens5.h5")
+        os.path.join(DataPath, "opens5.h5"),
+        os.path.join(DataPath, "rectrees1.h5")
     ]
 
     full_dataset = VLSIOpenMaskDataset(h5_paths)
 
     #load data
     split = int(len(full_dataset)*0.9)
-    train_indices   = list(range(split))
+
+    train_path = os.path.join(OutputDir, "train_indices.npy")
+    val_path   = os.path.join(OutputDir, "val_indices.npy")
+
+    train_indices = np.load(train_path) #load from previous training run
+    val_indices   = np.load(val_path)
+
+    # train_indices   = list(range(split))
+    # val_indices   = list(range(split, len(full_dataset)))
+    
     train_dataset = Subset(full_dataset, train_indices)
-    val_indices   = list(range(split, len(full_dataset)))
     val_dataset = Subset(full_dataset, val_indices)
     
 
