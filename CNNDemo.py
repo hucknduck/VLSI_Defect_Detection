@@ -1,5 +1,6 @@
 import os
 import torch
+import random
 import torch.nn.functional as F
 import matplotlib
 import matplotlib.pyplot as plt
@@ -36,8 +37,12 @@ labels_df = pd.read_csv(csv_path)
 images = []
 labels = []
 preds = []
-for i in range(4):
-    img_path = os.path.join(DATA_PATH, f"image_{i}.png")
+
+available_imgs = list(range(25))
+chosen_imgs = random.sample(available_imgs, 4)
+
+for img_loc in chosen_imgs:
+    img_path = os.path.join(DATA_PATH, f"image_{img_loc}.png")
     img = Image.open(img_path).convert("L")
     tensor = transform(img).unsqueeze(0).to(device) 
     with torch.no_grad():
@@ -50,12 +55,12 @@ for i in range(4):
     Y_pred = pred_label % 48
 
     images.append(img)
-    labels.append(labels_df["label"].iloc[i])
+    labels.append(labels_df["label"].iloc[img_loc])
     preds.append((X_pred, Y_pred))
 
 fig, axes = plt.subplots(2, 2, figsize=(8, 8))
 
-for ax, img, lbl, idx in zip(axes.ravel(), images, labels, range(4)):
+for ax, img, lbl, idx, img_idx in zip(axes.ravel(), images, labels, range(4), chosen_imgs):
     X = int(lbl[1:3])
     Y = int(lbl[4:6])
 
@@ -65,6 +70,7 @@ for ax, img, lbl, idx in zip(axes.ravel(), images, labels, range(4)):
     ax.imshow(img, cmap="gray")
     ax.scatter(Y, X, color="red", s=100, label="True Label", marker='o')
     ax.scatter(Y_pred, X_pred, color="lime", s=100, label="Predicted Label", marker='x')
+    ax.set_title(f"Image {img_idx}: True {lbl}  vs Pred ({X_pred},{Y_pred})")
     ax.axis("off")
 
 plt.tight_layout()
