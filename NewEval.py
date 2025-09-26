@@ -4,7 +4,7 @@ import torchvision.transforms.functional as TF
 import torch
 import torch.distributed as dist
 import argparse
-from Model import DiscreteCenterPredictorCNN
+from NewModel import DiscreteCenterPredictorCNN, CNNTiny, CNNSmall, CNNMedium, CNNLarge
 from NewDataSet import VLSIOpenMaskDataset
 from torch.utils.data import Subset, DataLoader, DistributedSampler
 import os
@@ -21,19 +21,18 @@ def setup_ddp():
 def cleanup_ddp():
     dist.destroy_process_group()
 
-def Eval(ModelPath, OutputDir, DataPath, local_rank):
+def is_within_one(preds, labels, size=48):
+    # Decode flattened index -> (X, Y)
+    pred_x, pred_y = preds // size, preds % size
+    label_x, label_y = labels // size, labels % size
+    # Manhattan or Chebyshev distance check (Chebyshev = max difference <= 1)
+    return ((pred_x - label_x).abs() <= 1) & ((pred_y - label_y).abs() <= 1)
+
+def Eval(ModelPath, OutputDir, DataPath, CheckWithinOne, local_rank):
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     device = torch.device("cuda", local_rank)
     print(f"[Rank {rank}] Using device: {device}")
-    
-    #load model
-    model = DiscreteCenterPredictorCNN()
-    model.to(torch.device(f"cuda:{local_rank}"))
-    model = DDP(model, device_ids=[local_rank])
-    model.load_state_dict(torch.load(ModelPath))
-    model.eval()
-
 
     h5_paths = [
         os.path.join(DataPath, "opens1.h5"),
@@ -61,8 +60,6 @@ def Eval(ModelPath, OutputDir, DataPath, local_rank):
     train_dataset = Subset(full_dataset, train_indices)
     val_dataset = Subset(full_dataset, val_indices)
     
-
-
     train_sampler = DistributedSampler(
         train_dataset,
         num_replicas=world_size,
@@ -94,42 +91,54 @@ def Eval(ModelPath, OutputDir, DataPath, local_rank):
         pin_memory=True
     )
 
-    running_loss = 0
-    train_total = 0
-    val_total = 0
-    with torch.no_grad():
-        for batch_idx, (images, targets) in enumerate(tqdm(train_loader)):
-            images = images.to(device, non_blocking=True)
-            labels = targets['labels'].squeeze(1).to(device, non_blocking=True)
+    modeltypes = [CNNTiny, CNNSmall, CNNMedium, CNNLarge]
+    for modeltype in modeltypes:
+        #load model
+        model = modeltype()
+        model.to(torch.device(f"cuda:{local_rank}"))
+        model = DDP(model, device_ids=[local_rank])
+        TrueModelPath = os.path.join(ModelPath, modeltype.__name__, "Best.pth")
+        model.load_state_dict(torch.load(TrueModelPath, map_location=device))
+        model.eval()
 
-            logits = model(images).float()
-            probs = F.softmax(logits, dim=1)
-            preds = torch.argmax(probs, dim=1)
+        running_loss = 0
+        train_total = 0
+        val_total = 0
+        
+        
+        
+        with torch.no_grad():
+            for batch_idx, (images, targets) in enumerate(tqdm(train_loader)):
+                images = images.to(device, non_blocking=True)
+                labels = targets['labels'].squeeze(1).to(device, non_blocking=True)
 
-            running_loss += (preds == labels).sum().item()
-            train_total += labels.size(0)
-            
-        # Validation loop (compute losses only)
-        val_loss = 0.0
-        for batch_idx, (images, targets) in enumerate(tqdm(val_loader)):
-            images = images.to(device, non_blocking=True)
-            labels = targets['labels'].squeeze(1).to(device, non_blocking=True)
-            
-            logits = model(images).float()
-            probs = F.softmax(logits, dim=1)
-            preds = torch.argmax(probs, dim=1)
+                logits = model(images).float()
+                probs = F.softmax(logits, dim=1)
+                preds = torch.argmax(probs, dim=1)
 
-            val_loss += (preds == labels).sum().item()
-            train_total += labels.size(0)
-            val_total += labels.size(0)
+                running_loss += (preds == labels).sum().item() if not CheckWithinOne else is_within_one(preds, labels).sum().item()
+                train_total += labels.size(0)
+                
+            # Validation loop (compute losses only)
+            val_loss = 0.0
+            for batch_idx, (images, targets) in enumerate(tqdm(val_loader)):
+                images = images.to(device, non_blocking=True)
+                labels = targets['labels'].squeeze(1).to(device, non_blocking=True)
+                
+                logits = model(images).float()
+                probs = F.softmax(logits, dim=1)
+                preds = torch.argmax(probs, dim=1)
 
+                val_loss += (preds == labels).sum().item() if not CheckWithinOne else is_within_one(preds, labels).sum().item()
+                train_total += labels.size(0)
+                val_total += labels.size(0)
 
+        running_loss += val_loss
+        val_loss /= val_total
+        running_loss /= train_total
+        print(f"Model {modeltype.__name__} achieves {val_loss} test accuracy")
+        print(f"Model {modeltype.__name__} achieves {running_loss} total accuracy")
 
-    running_loss += val_loss
-    val_loss /= val_total
-    running_loss /= train_total
-    print(f"Model achieves {val_loss} test accuracy")
-    print(f"Model achieves {running_loss} total accuracy")
     cleanup_ddp()
 
 if __name__ == '__main__':
@@ -138,7 +147,9 @@ if __name__ == '__main__':
     local_rank = setup_ddp()
 
     parser.add_argument("ModelPath", type=str, help="Path to model statedict")
+    parser.add_argument("OutputDir", type=str, help="Path to output directory containing train/val splits")
     parser.add_argument("DataDir", type=str, help="path to h5 directory")
+    parser.add_argument("--CheckWithinOne", action='store_true', help="Optional - Check if pred is withing 3x3 box around label", default=False)
 
     args = parser.parse_args()
-    Eval(args.ModelPath, args.DataDir, local_rank)
+    Eval(args.ModelPath, args.OutputDir, args.DataDir, args.CheckWithinOne, local_rank)

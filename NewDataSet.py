@@ -2,9 +2,11 @@ from torch.utils.data import Dataset, get_worker_info
 import h5py
 import torch
 import numpy as np
+import random
+import cv2
 
 class VLSIOpenMaskDataset(Dataset):
-    def __init__(self, h5_paths):
+    def __init__(self, h5_paths, noise_gaussian=False, noise_salt_and_pepper=False, noise_blur=False, noise_prob=0.0, gaussian_std=0.1, salt_and_pepper_amount=0.01, kernel_size=(3,3)):
         self.h5_paths = h5_paths
         self.index_map = []
         for file_idx, path in enumerate(self.h5_paths):
@@ -16,6 +18,13 @@ class VLSIOpenMaskDataset(Dataset):
                     i += 1
 
         self._h5_handles = None  # will be initialized per-worker
+        self.noise_gaussian = noise_gaussian
+        self.noise_salt_and_pepper = noise_salt_and_pepper
+        self.noise_blur = noise_blur
+        self.noise_prob = noise_prob
+        self.gaussian_std = gaussian_std
+        self.salt_and_pepper_amount = salt_and_pepper_amount
+        self.kernel_size = kernel_size
 
     def _init_handles(self):
         # Called once per worker
@@ -30,6 +39,32 @@ class VLSIOpenMaskDataset(Dataset):
         if self._h5_handles:
             for f in self._h5_handles:
                 f.close()
+
+    def _noise_img(self, img):
+        if self.noise_gaussian:
+            noise = np.random.normal(0, self.gaussian_std, img.shape)
+            img = img + noise
+            img = np.clip(img, 0.0, 1.0)
+
+        if self.noise_salt_and_pepper:
+            ratio = random.random()
+            num_salt = np.ceil(self.salt_and_pepper_amount * img.size * ratio)
+            num_pepper = np.ceil(self.salt_and_pepper_amount * img.size * (1.0 - ratio))
+
+            # Add Salt noise
+            coords = [np.random.randint(0, i - 1, int(num_salt)) for i in img.shape]
+            img[tuple(coords)] = 1
+
+            # Add Pepper noise
+            coords = [np.random.randint(0, i - 1, int(num_pepper)) for i in img.shape]
+            img[tuple(coords)] = 0
+
+        if self.noise_blur:
+            img = (img * 255).astype(np.uint8)
+            img = cv2.GaussianBlur(img, self.kernel_size, 0)
+            img = img.astype(np.float32) / 255.0
+
+        return img
 
     def __getitem__(self, idx):
         # Per-worker handle initialization
@@ -50,6 +85,10 @@ class VLSIOpenMaskDataset(Dataset):
         except: center_np = (48,0) #dummy value for circuit with no defects
         
         img_np = img_np.astype(np.float32) / 255.0
+        
+        if random.random() < self.noise_prob:
+            img_np = self._noise_img(img_np)
+        
         img_tensor = torch.from_numpy(img_np).unsqueeze(0)
 
         label = torch.tensor([center_np[0] * 48 + center_np[1]], dtype=torch.int64)
